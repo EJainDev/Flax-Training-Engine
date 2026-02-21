@@ -1,19 +1,18 @@
 import os
-import jax
-from flax import nnx
+from pathlib import Path
 from typing import Any
+
+import grain
+import jax
+import jax.numpy as jnp
 import optax
 import orbax.checkpoint as ocp
+from flax import nnx
 from flax.metrics import tensorboard
-import grain
 from tqdm.auto import tqdm
 
-from .fake_logger import FakeLogger
-
 from .fake_checkpointer import FakeCheckpointer
-
-from pathlib import Path
-import jax.numpy as jnp
+from .fake_logger import FakeLogger
 
 
 def train(
@@ -34,21 +33,28 @@ def train(
     """
     Trains the given model for a specified number of epochs with mean squared error loss (MSE).
 
-    If there is already a checkpoint for this experiment, it will continue from that checkpoint and load all the states.
+    If there is already a checkpoint for this experiment, it will continue from that checkpoint 
+    and load all the states.
 
-    Every epoch, the best model is checkpointed according to the loss function on the validation dataset.
-    It stores at max 3 checkpoints with the model state, optimizer state, and metadata that can be used to gain more information.
-    Specifically, the model state is the parameters (obtained through nnx.split(model, nnx.Param, nnx.Everything())[1] and optimizer.update(...)),
-    the optimizer state is the optax optimizer state (obtained through optimizer.init(params) and optimizer.update(...)),
-    and the metadata contains the training and validation loss for that epoch.
+    Every epoch, the best model is checkpointed according to the loss function on the validation 
+    dataset. It stores at max 3 checkpoints with the model state, optimizer state, and metadata 
+    that can be used to gain more information.Specifically, the model state is the parameters 
+    (obtained through nnx.split(model, nnx.Param, nnx.Everything())[1] and optimizer.update(...)), 
+    the optimizer state is the optax optimizer state (obtained through optimizer.init(params) and 
+    optimizer.update(...)), and the metadata contains the training and validation loss for that 
+    epoch.
 
     :param model: The model to train, a new instance of the 'Model' class.
     :type model: nnx.Module
     :param optimizer: The optax optimizer to use to train the model (eg. optax.adam)
     :type optimizer: optax.GradientTransformation
-    :param train_dataset: A grain iterable dataset that contains the training samples and on iteration returns a dictionary with keys 'features' and 'targets' that correspond to the input features and target outputs respectively
+    :param train_dataset: A grain iterable dataset that contains the training samples and on 
+    iteration returns a dictionary with keys 'features' and 'targets' that correspond to the input 
+    features and target outputs respectively
     :type train_dataset: grain.IterDataset
-    :param val_dataset: A grain iterable dataset that contains the validation samples and on iteration returns a dictionary with keys 'features' and 'targets' that correspond to the input features and target outputs respectively
+    :param val_dataset: A grain iterable dataset that contains the validation samples and on 
+    iteration returns a dictionary with keys 'features' and 'targets' that correspond to the input 
+    features and target outputs respectively
     :type val_dataset: grain.IterDataset
     :param num_train_samples: The number of training samples in the training dataset
     :type num_train_samples: int
@@ -58,17 +64,22 @@ def train(
     :type num_epochs: int
     :param batch_size: The batch size to use during training
     :type batch_size: int
-    :param rngs: The random number generators for all random operations, passed to the model during training as a kwarg 'rngs' and passes a 'train' boolean representing whether or not training is occuring
+    :param rngs: The random number generators for all random operations, passed to the model 
+    during training as a kwarg 'rngs' and passes a 'train' boolean representing whether or not 
+    training is occuring
     :type rngs: nnx.Rngs
-    :param checkpoint_dir: Directory to save and restore checkpoints, if none, disables checkpointing (not recommended)
+    :param checkpoint_dir: Directory to save and restore checkpoints, if none, disables 
+    checkpointing (not recommended)
     :type checkpoint_dir: str | Path | None
-    :param tensorboard_dir: Directory to save tensorboard logs, if none, disables tensorboard logging (not recommended)
+    :param tensorboard_dir: Directory to save tensorboard logs, if none, disables tensorboard 
+    logging (not recommended)
     :type tensorboard_dir: str | Path | None
     :param restore_from_checkpoint: Whether to restore from an existing checkpoint if available
     :type restore_from_checkpoint: bool | None
     :param metadata: Additional metadata to store with checkpoints
     :type metadata: dict
-    :return: The trained model after the specified number of epochs, the final optimizer state, the new Rngs, and metadata
+    :return: The trained model after the specified number of epochs, the final optimizer state, 
+    the new Rngs, and metadata
     :rtype: tuple[nnx.Module, Any, nnx.Rngs, dict]
     """
 
@@ -82,7 +93,8 @@ def train(
         max_to_keep=3,
         best_fn=lambda tree: tree["val_loss"] + tree["train_loss"] / 5,
         best_mode="min",
-    )  # We want to focus most on the validation loss but if train loss, explodes, it should have an impact
+    )  # We want to focus most on the validation loss but if train loss, explodes, it should have
+    # an impact
     if checkpoint_dir is None:
         mngr = FakeCheckpointer()
     else:
@@ -108,8 +120,9 @@ def train(
     rngs_graphdef, rngs_state = nnx.split(rngs)
     rngs_leaves, rngs_state_graphdef = jax.tree.flatten(rngs_state)
 
-    # Get the constant graph defs of the params and opt_state for later reconstruction as well as the leaves
-    # We can get leaves here because the helper functions only return leaves and we never change the whole param pytree at once
+    # Get the constant graph defs of the params and opt_state for later reconstruction as well as
+    # the leaves. We can get leaves here because the helper functions only return leaves and we
+    # never change the whole param pytree at once
     param_leaves, param_graph_def = jax.tree.flatten(params)
     opt_state_leaves, opt_state_graph_def = jax.tree.flatten(opt_state)
 
@@ -149,16 +162,33 @@ def train(
         This function uses a few optimization techniques to ensure maximum performance.
         However, this is less noticeable for larger models compared to smaller models.
 
-        1) Firstly, we don't pass in the model as a parameter and instead only pass the changing parameters. As a result, we use nnx.merge to reconstruct the model by capturing its graph definition and static values at the first execution and pass the changed parameters. This can be broken down into a few reasons:
-            1) flax.nnx.value_and_grad is not as performant as jax.value_and_grad due to several substeps it takes to ensure proper model state handling and it is written in Python. In smaller models, this overhead is incredibly noticable and therefore something optimize out.
+        1) Firstly, we don't pass in the model as a parameter and instead only pass the changing 
+           parameters. As a result, we use nnx.merge to reconstruct the model by capturing its 
+           graph definition and static values at the first execution and pass the changed 
+           parameters. This can be broken down into a few reasons:
+            1) flax.nnx.value_and_grad is not as performant as jax.value_and_grad due to several 
+               substeps it takes to ensure proper model state handling and it is written in 
+               Python. In smaller models, this overhead is incredibly noticable and therefore 
+               something optimize out.
             2) By only passing in the changing parameters, we reduce the amount of data transfer
-            3) The value_and_grad function has to flatten the model PyTree in order to be able to pass it to the accelerator which we can minimize by only passing in the parameters
-        2) Secondly, we only pass in the parameter leaves of the model instead of the full parameter pytree. Therefore, we reconstruct the parameter PyTree inside the function with one call to jax.tree.unflatten for the following reasons:
+            3) The value_and_grad function has to flatten the model PyTree in order to be able to 
+            pass it to the accelerator which we can minimize by only passing in the parameters
+        2) Secondly, we only pass in the parameter leaves of the model instead of the full 
+           parameter pytree. Therefore, we reconstruct the parameter PyTree inside the function 
+           with one call to jax.tree.unflatten for the following reasons:
             1) This further reduces the amount of data transfer to the accelerator
-            2) The value_and_grad function no longer has to flatten AND unflatten the parameter pytree which can be costly and with a static graphdef, we can capture it once to reconstruct the parameters internally. Instead of having to pass both the graph definition and parameters, we rely on the staticness of the graph definition to reconstruct the same pytree with different leaves. A simple workaround for a model that has slightly changing graph definitions would be to pass the graphdef as a static argument.
+            2) The value_and_grad function no longer has to flatten AND unflatten the parameter 
+              pytree which can be costly and with a static graphdef, we can capture it once to 
+              reconstruct the parameters internally. Instead of having to pass both the graph 
+              definition and parameters, we rely on the staticness of the graph definition to 
+              reconstruct the same pytree with different leaves. A simple workaround for a model 
+              that has slightly changing graph definitions would be to pass the graphdef as a 
+              static argument.
 
-        So how does the last optimization affect gradient calculation? When gradients are calculated, instead of being in a PyTree, they are just leaves.
-        To overcome this, you can easily turn it into a PyTree to use with Optax by using the same graph definition as for the parameters.
+        So how does the last optimization affect gradient calculation? When gradients are 
+        calculated, instead of being in a PyTree, they are just leaves.
+        To overcome this, you can easily turn it into a PyTree to use with Optax by using the same 
+        graph definition as for the parameters.
 
         :param param_leaves: The leaves of the pytree representing the model parameters
         :type param_leaves: list[Any]
@@ -168,12 +198,15 @@ def train(
         :type y: jax.Array
         :param rngs_leaves: The leaves of the pytree representing the random number generator state
         :type rngs_leaves: list[Any]
-        :param training: Whether or not the model is being trained (affects layers like dropout, batchnorm, etc.)
+        :param training: Whether or not the model is being trained (affects layers like dropout, 
+        batchnorm, etc.)
         :type training: bool
-        :return: A loss value for the given batch as the mean squared error as the only element of the array and the new pytree leaves for the rng states
+        :return: A loss value for the given batch as the mean squared error as the only element of 
+        the array and the new pytree leaves for the rng states
         :rtype: tuple[jax.Array, list[Any]]
 
-        .. warning:: When taking the gradients for the 'param_leaves' arg, the returned gradients are PyTree leaves to be unflattened with the same graphdef as the parameters.
+        .. warning:: When taking the gradients for the 'param_leaves' arg, the returned gradients 
+        are PyTree leaves to be unflattened with the same graphdef as the parameters.
         """
 
         # Restore the rngs pytree from the leaves
@@ -211,19 +244,36 @@ def train(
         This function uses a few optimization techniques to ensure maximum performance.
         However, this is less noticeable for larger models compared to smaller models.
 
-        1) Firstly, we don't pass in the model as a parameter and instead only pass the changing parameters. As a result, we use nnx.merge to reconstruct the model by capturing its graph definition and static values at the first execution and pass the changed parameters. This can be broken down into a few reasons:
-            1) flax.nnx.jit is not as performant as jax.jit due to several substeps it takes to ensure proper model state handling and it is written in Python. In smaller models, this overhead is incredibly noticable and therefore something optimize out.
+        1) Firstly, we don't pass in the model as a parameter and instead only pass the changing 
+           parameters. As a result, we use nnx.merge to reconstruct the model by capturing its 
+           graph definition and static values at the first execution and pass the changed 
+           parameters. This can be broken down into a few reasons:
+            1) flax.nnx.jit is not as performant as jax.jit due to several substeps it takes to 
+               ensure proper model state handling and it is written in Python. In smaller models, 
+               this overhead is incredibly noticable and therefore something optimize out.
             2) By only passing in the changing parameters, we reduce the amount of data transfer
-            3) The JIT function has to flatten the model PyTree in order to be able to pass it to the accelerator which we can minimize by only passing in the parameters
-        2) Secondly, we only pass in the parameter leaves of the model instead of the full parameter pytree. Therefore, we reconstruct the parameter PyTree inside the function with one call to jax.tree.unflatten for the following reasons:
+            3) The JIT function has to flatten the model PyTree in order to be able to pass it to 
+               the accelerator which we can minimize by only passing in the parameters
+        2) Secondly, we only pass in the parameter leaves of the model instead of the full 
+           parameter pytree. Therefore, we reconstruct the parameter PyTree inside the function 
+           with one call to jax.tree.unflatten for the following reasons:
             1) This further reduces the amount of data transfer to the accelerator
-            2) The JIT function no longer has to flatten AND unflatten the parameter pytree which can be costly and with a static graphdef, we can capture it once to reconstruct the parameters internally. Instead of having to pass both the graph definition and parameters, we rely on the staticness of the graph definition to reconstruct the same pytree with different leaves. A simple workaround for a model that has slightly changing graph definitions would be to pass the graphdef as a static argument.
-        3) Similarly, we only pass in the optimizer state leaves and not the full PyTree following a similar process as above.
+            2) The JIT function no longer has to flatten AND unflatten the parameter pytree which 
+               can be costly and with a static graphdef, we can capture it once to reconstruct the 
+               parameters internally. Instead of having to pass both the graph definition and 
+               parameters, we rely on the staticness of the graph definition to reconstruct the 
+               same pytree with different leaves. A simple workaround for a model that has slightly 
+               changing graph definitions would be to pass the graphdef as a static argument.
+        3) Similarly, we only pass in the optimizer state leaves and not the full PyTree following 
+           a similar process as above.
 
-        The last key optimization is the returning of PyTree leaves and not PyTrees for both the model parameters and the optimization state.
-        This reduces the overhead of the JIT compiled function by not forcing it to flatten and unflatten the PyTrees.
+        The last key optimization is the returning of PyTree leaves and not PyTrees for both the 
+        model parameters and the optimization state.
+        This reduces the overhead of the JIT compiled function by not forcing it to flatten and 
+        unflatten the PyTrees.
         For most use cases, this is fine, especially in tight training loops.
-        However, you can easily unflatten right outside of this JIT region, or even just return the PyTrees from here.
+        However, you can easily unflatten right outside of this JIT region, or even just return 
+        the PyTrees from here.
 
         :param param_leaves: The leaves of the pytree representing the model parameters
         :type param_leaves: list[Any]
@@ -235,7 +285,8 @@ def train(
         :type y: jax.Array
         :param rngs_leaves: The leaves of the pytree representing the random number generator state
         :type rngs_leaves: list[Any]
-        :return: A tuple containing the updated parameter leaves, updated optimizer state leaves, the new random state leaves, and the loss value for the batch
+        :return: A tuple containing the updated parameter leaves, updated optimizer state leaves, 
+        the new random state leaves, and the loss value for the batch
         :rtype: tuple[list[Any], list[Any], list[Any], jax.Array]
         """
 
@@ -274,14 +325,29 @@ def train(
         This function uses a few optimization techniques to ensure maximum performance.
         However, this is less noticeable for larger models compared to smaller models.
 
-        1) Firstly, we don't pass in the model as a parameter and instead only pass the changing parameters. As a result, we use nnx.merge to reconstruct the model by capturing its graph definition and static values at the first execution and pass the changed parameters. This can be broken down into a few reasons:
-            1) flax.nnx.jit is not as performant as jax.jit due to several substeps it takes to ensure proper model state handling and it is written in Python. In smaller models, this overhead is incredibly noticable and therefore something optimize out.
+        1) Firstly, we don't pass in the model as a parameter and instead only pass the changing 
+           parameters. As a result, we use nnx.merge to reconstruct the model by capturing its 
+           graph definition and static values at the first execution and pass the changed 
+           parameters. This can be broken down into a few reasons:
+            1) flax.nnx.jit is not as performant as jax.jit due to several substeps it takes to 
+               ensure proper model state handling and it is written in Python. In smaller models, 
+               this overhead is incredibly noticable and therefore something optimize out.
             2) By only passing in the changing parameters, we reduce the amount of data transfer
-            3) The JIT function has to flatten the model PyTree in order to be able to pass it to the accelerator which we can minimize by only passing in the parameters
-        2) Secondly, we only pass in the parameter leaves of the model instead of the full parameter pytree. Therefore, we reconstruct the parameter PyTree inside the function with one call to jax.tree.unflatten for the following reasons:
+            3) The JIT function has to flatten the model PyTree in order to be able to pass it to 
+               the accelerator which we can minimize by only passing in the parameters
+        2) Secondly, we only pass in the parameter leaves of the model instead of the full 
+           parameter pytree. Therefore, we reconstruct the parameter PyTree inside the function 
+           with one call to jax.tree.unflatten for the following reasons:
             1) This further reduces the amount of data transfer to the accelerator
-            2) The JIT function no longer has to flatten AND unflatten the parameter pytree which can be costly and with a static graphdef, we can capture it once to reconstruct the parameters internally. Instead of having to pass both the graph definition and parameters, we rely on the staticness of the graph definition to reconstruct the same pytree with different leaves. A simple workaround for a model that has slightly changing graph definitions would be to pass the graphdef as a static argument.
-        3) Similarly, we only pass in the optimizer state leaves and not the full PyTree following a similar process as above.
+            2) The JIT function no longer has to flatten AND unflatten the parameter pytree which 
+               can be costly and with a static graphdef, we can capture it once to reconstruct the 
+               parameters internally. Instead of having to pass both the graph definition and 
+               parameters, we rely on the staticness of the graph definition to reconstruct the 
+               same pytree with different leaves. A simple workaround for a model that has 
+               slightly changing graph definitions would be to pass the graphdef as a static 
+               argument.
+        3) Similarly, we only pass in the optimizer state leaves and not the full PyTree following 
+           a similar process as above.
 
         :param param_leaves: The leaves of the pytree representing the model parameters
         :type param_leaves: list[Any]
@@ -294,7 +360,8 @@ def train(
         :return: The loss value for the batch
         :rtype: jax.Array
 
-        .. note:: This is currently just a JIT wrapper around the loss function but can be extended for more advanced use.
+        .. note:: This is currently just a JIT wrapper around the loss function but can be 
+                  extended for more advanced use.
         """
         return loss_fn(param_leaves, x, y, rngs_leaves, False)[0]
 
@@ -304,7 +371,8 @@ def train(
 
     # The actual training loop
     for epoch in range(num_epochs):
-        model.train()  # Important for layers like dropout, batchnorm, etc. since we do both training and validation every epoch
+        model.train()  # Important for layers like dropout, batchnorm, etc. since we do both 
+                       # training and validation every epoch
 
         train_loss = 0.0  # Accumulates training loss over the batch
 
@@ -315,8 +383,10 @@ def train(
             desc=f"Train {epoch + 1}/{num_epochs}",
             leave=False,
         ):
-            x: jax.Array = jax.device_put(data["features"])  # Move data to accelerator
-            y: jax.Array = jax.device_put(data["targets"])  # Move data to accelerator
+            x: jax.Array = jax.device_put(
+                data["features"])  # Move data to accelerator
+            y: jax.Array = jax.device_put(
+                data["targets"])  # Move data to accelerator
 
             # Train
             param_leaves, opt_state_leaves, rngs_leaves, loss = train_step(
@@ -339,8 +409,10 @@ def train(
             desc=f"Val {epoch + 1}/{num_epochs}",
             leave=False,
         ):
-            x: jax.Array = jax.device_put(data["features"])  # Move data to accelerator
-            y: jax.Array = jax.device_put(data["targets"])  # Move data to accelerator
+            x: jax.Array = jax.device_put(
+                data["features"])  # Move data to accelerator
+            y: jax.Array = jax.device_put(
+                data["targets"])  # Move data to accelerator
 
             # Validate and accumulate loss
             val_loss += validation_step(param_leaves, x, y, rngs_leaves).item()
@@ -357,8 +429,10 @@ def train(
         data = next(
             iter(val_dataset)
         )  # Get a dummy sample of data that (should) be the same every epoch
-        x: jax.Array = jax.device_put(data["features"])  # Move data to accelerator
-        y: jax.Array = jax.device_put(data["targets"])  # Move data to accelerator
+        x: jax.Array = jax.device_put(
+            data["features"])  # Move data to accelerator
+        y: jax.Array = jax.device_put(
+            data["targets"])  # Move data to accelerator
 
         (preds, _), grads = jax.value_and_grad(loss_fn, has_aux=True)(
             param_leaves, x, y, rngs_leaves, False
@@ -373,12 +447,12 @@ def train(
             tag = "/".join([str(p) for p in path])
             writer.histogram(f"parameters/{tag}", param, step=epoch)
 
-        writer.histogram(f"validation/predictions", preds, step=epoch)
+        writer.histogram("validation/predictions", preds, step=epoch)
         writer.scalar("train/loss", train_loss, epoch)
         writer.scalar("val/loss", val_loss, epoch)
 
         print(
-            f"Epoch {epoch + 1}/{num_epochs} - Train Loss: {train_loss:.6f} - Val Loss: {val_loss:.6f}"
+            f"Epoch {epoch + 1}/{num_epochs} - Train Loss: {train_loss:.6f} - Val Loss: {val_loss:.6f}" # pylint: disable=line-too-long
         )
 
         # Save checkpoint
@@ -402,6 +476,7 @@ def train(
     return (
         model,
         opt_state,
-        nnx.merge(rngs_graphdef, jax.tree.unflatten(rngs_state_graphdef, rngs_leaves)),
+        nnx.merge(rngs_graphdef, jax.tree.unflatten(
+            rngs_state_graphdef, rngs_leaves)),
         metadata,
     )
