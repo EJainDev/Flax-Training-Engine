@@ -15,7 +15,7 @@ from .fake_checkpointer import FakeCheckpointer
 from .fake_logger import FakeLogger
 
 
-def train(
+def train(  # pylint: disable=dangerous-default-value, too-many-arguments, too-many-locals, too-many-statements, too-many-positional-arguments
     model: nnx.Module,
     optimizer: optax.GradientTransformation,
     train_dataset: grain.IterDataset,
@@ -49,12 +49,12 @@ def train(
     :param optimizer: The optax optimizer to use to train the model (eg. optax.adam)
     :type optimizer: optax.GradientTransformation
     :param train_dataset: A grain iterable dataset that contains the training samples and on 
-    iteration returns a dictionary with keys 'features' and 'targets' that correspond to the input 
-    features and target outputs respectively
+                          iteration returns a dictionary with keys 'features' and 'targets' that 
+                          correspond to the input features and target outputs respectively
     :type train_dataset: grain.IterDataset
     :param val_dataset: A grain iterable dataset that contains the validation samples and on 
-    iteration returns a dictionary with keys 'features' and 'targets' that correspond to the input 
-    features and target outputs respectively
+                        iteration returns a dictionary with keys 'features' and 'targets' that 
+                        correspond to the input features and target outputs respectively
     :type val_dataset: grain.IterDataset
     :param num_train_samples: The number of training samples in the training dataset
     :type num_train_samples: int
@@ -65,21 +65,21 @@ def train(
     :param batch_size: The batch size to use during training
     :type batch_size: int
     :param rngs: The random number generators for all random operations, passed to the model 
-    during training as a kwarg 'rngs' and passes a 'train' boolean representing whether or not 
-    training is occuring
+                 during training as a kwarg 'rngs' and passes a 'train' boolean representing 
+                 whether or not training is occuring
     :type rngs: nnx.Rngs
     :param checkpoint_dir: Directory to save and restore checkpoints, if none, disables 
-    checkpointing (not recommended)
+                           checkpointing (not recommended)
     :type checkpoint_dir: str | Path | None
     :param tensorboard_dir: Directory to save tensorboard logs, if none, disables tensorboard 
-    logging (not recommended)
+                            logging (not recommended)
     :type tensorboard_dir: str | Path | None
     :param restore_from_checkpoint: Whether to restore from an existing checkpoint if available
     :type restore_from_checkpoint: bool | None
     :param metadata: Additional metadata to store with checkpoints
     :type metadata: dict
     :return: The trained model after the specified number of epochs, the final optimizer state, 
-    the new Rngs, and metadata
+             the new Rngs, and metadata
     :rtype: tuple[nnx.Module, Any, nnx.Rngs, dict]
     """
 
@@ -132,7 +132,7 @@ def train(
         and os.path.exists(str(checkpoint_dir))
         and os.listdir(str(checkpoint_dir)) != []
     ):
-        restored = mngr.restore(
+        restored = mngr.restore(  # pylint: disable=assignment-from-no-return
             step=None,
             args=ocp.args.Composite(
                 model_state=ocp.args.PyTreeRestore(),
@@ -178,17 +178,17 @@ def train(
            with one call to jax.tree.unflatten for the following reasons:
             1) This further reduces the amount of data transfer to the accelerator
             2) The value_and_grad function no longer has to flatten AND unflatten the parameter 
-              pytree which can be costly and with a static graphdef, we can capture it once to 
-              reconstruct the parameters internally. Instead of having to pass both the graph 
-              definition and parameters, we rely on the staticness of the graph definition to 
-              reconstruct the same pytree with different leaves. A simple workaround for a model 
-              that has slightly changing graph definitions would be to pass the graphdef as a 
-              static argument.
+               pytree which can be costly and with a static graphdef, we can capture it once to 
+               reconstruct the parameters internally. Instead of having to pass both the graph 
+               definition and parameters, we rely on the staticness of the graph definition to 
+               reconstruct the same pytree with different leaves. A simple workaround for a model 
+               that has slightly changing graph definitions would be to pass the graphdef as a 
+               static argument.
 
         So how does the last optimization affect gradient calculation? When gradients are 
-        calculated, instead of being in a PyTree, they are just leaves.
-        To overcome this, you can easily turn it into a PyTree to use with Optax by using the same 
-        graph definition as for the parameters.
+        calculated, instead of being in a PyTree, they are just leaves. To overcome this, you can 
+        easily turn it into a PyTree to use with Optax by using the same graph definition as for 
+        the parameters.
 
         :param param_leaves: The leaves of the pytree representing the model parameters
         :type param_leaves: list[Any]
@@ -206,7 +206,7 @@ def train(
         :rtype: tuple[jax.Array, list[Any]]
 
         .. warning:: When taking the gradients for the 'param_leaves' arg, the returned gradients 
-        are PyTree leaves to be unflattened with the same graphdef as the parameters.
+                     are PyTree leaves to be unflattened with the same graphdef as the parameters.
         """
 
         # Restore the rngs pytree from the leaves
@@ -268,12 +268,10 @@ def train(
            a similar process as above.
 
         The last key optimization is the returning of PyTree leaves and not PyTrees for both the 
-        model parameters and the optimization state.
-        This reduces the overhead of the JIT compiled function by not forcing it to flatten and 
-        unflatten the PyTrees.
-        For most use cases, this is fine, especially in tight training loops.
-        However, you can easily unflatten right outside of this JIT region, or even just return 
-        the PyTrees from here.
+        model parameters and the optimization state. This reduces the overhead of the JIT compiled 
+        function by not forcing it to flatten and unflatten the PyTrees. For most use cases, this 
+        is fine, especially in tight training loops. However, you can easily unflatten right 
+        outside of this JIT region, or even just return the PyTrees from here.
 
         :param param_leaves: The leaves of the pytree representing the model parameters
         :type param_leaves: list[Any]
@@ -286,7 +284,7 @@ def train(
         :param rngs_leaves: The leaves of the pytree representing the random number generator state
         :type rngs_leaves: list[Any]
         :return: A tuple containing the updated parameter leaves, updated optimizer state leaves, 
-        the new random state leaves, and the loss value for the batch
+                 the new random state leaves, and the loss value for the batch
         :rtype: tuple[list[Any], list[Any], list[Any], jax.Array]
         """
 
@@ -371,8 +369,8 @@ def train(
 
     # The actual training loop
     for epoch in range(num_epochs):
-        model.train()  # Important for layers like dropout, batchnorm, etc. since we do both 
-                       # training and validation every epoch
+        model.train()  # Important for layers like dropout, batchnorm, etc. since we do both
+        # training and validation every epoch
 
         train_loss = 0.0  # Accumulates training loss over the batch
 
@@ -452,7 +450,7 @@ def train(
         writer.scalar("val/loss", val_loss, epoch)
 
         print(
-            f"Epoch {epoch + 1}/{num_epochs} - Train Loss: {train_loss:.6f} - Val Loss: {val_loss:.6f}" # pylint: disable=line-too-long
+            f"Epoch {epoch + 1}/{num_epochs} - Train Loss: {train_loss:.6f} - Val Loss: {val_loss:.6f}"  # pylint: disable=line-too-long
         )
 
         # Save checkpoint
