@@ -367,8 +367,14 @@ def train(  # pylint: disable=dangerous-default-value, too-many-arguments, too-m
     train_steps = num_train_samples // batch_size
     val_steps = num_val_samples // batch_size
 
+    # Start from the next epoch after the latest checkpoint
+    epoch = 1
+    latest_step = 0 if mngr.latest_step() is None else mngr.latest_step()
+    if latest_step is not None:
+        epoch = latest_step + 1
+
     # The actual training loop
-    for epoch in range(num_epochs):
+    for epoch in range(epoch, num_epochs + 1):
         model.train()  # Important for layers like dropout, batchnorm, etc. since we do both
         # training and validation every epoch
 
@@ -378,7 +384,7 @@ def train(  # pylint: disable=dangerous-default-value, too-many-arguments, too-m
         for data in tqdm(
             train_dataset,
             total=train_steps,
-            desc=f"Train {epoch + 1}/{num_epochs}",
+            desc=f"Train {epoch}/{num_epochs}",
             leave=False,
         ):
             x: jax.Array = jax.device_put(
@@ -404,13 +410,14 @@ def train(  # pylint: disable=dangerous-default-value, too-many-arguments, too-m
         for data in tqdm(
             val_dataset,
             total=val_steps,
-            desc=f"Val {epoch + 1}/{num_epochs}",
+            desc=f"Val {epoch}/{num_epochs}",
             leave=False,
         ):
             x: jax.Array = jax.device_put(
                 data["features"])  # Move data to accelerator
             y: jax.Array = jax.device_put(
-                data["targets"])  # Move data to accelerator
+                # Move data to accelerator0 if mngr.latest_step() is None else
+                data["targets"])
 
             # Validate and accumulate loss
             val_loss += validation_step(param_leaves, x, y, rngs_leaves).item()
@@ -432,9 +439,12 @@ def train(  # pylint: disable=dangerous-default-value, too-many-arguments, too-m
         y: jax.Array = jax.device_put(
             data["targets"])  # Move data to accelerator
 
-        (preds, _), grads = jax.value_and_grad(loss_fn, has_aux=True)(
+        _, grads = jax.value_and_grad(loss_fn, has_aux=True)(
             param_leaves, x, y, rngs_leaves, False
         )
+
+        # Unflatten gradients for logging
+        grads = jax.tree.unflatten(param_graph_def, grads)
 
         # Tensorboard logging
         for path, grad in jax.tree.flatten_with_path(grads)[0]:
@@ -445,7 +455,6 @@ def train(  # pylint: disable=dangerous-default-value, too-many-arguments, too-m
             tag = "/".join([str(p) for p in path])
             writer.histogram(f"parameters/{tag}", param, step=epoch)
 
-        writer.histogram("validation/predictions", preds, step=epoch)
         writer.scalar("train/loss", train_loss, epoch)
         writer.scalar("val/loss", val_loss, epoch)
 

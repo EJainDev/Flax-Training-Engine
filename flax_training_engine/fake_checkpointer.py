@@ -10,3 +10,6 @@ class FakeCheckpointer:
 
     def restore(self, *args, **kwargs) -> Any:
         pass
+
+    def latest_step(self) -> int:
+        return None
